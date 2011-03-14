@@ -73,6 +73,7 @@ module Google4R #:nodoc:
         ReturnItemsCommand => 'return-items',
         ResetItemsShippingInformationCommand => 'reset-items-shipping-information',
         OrderReportCommand => 'order-list-request',
+        NotificationHistoryCommand => 'notification-history-request',
       }
       
       def initialize(command)
@@ -87,9 +88,10 @@ module Google4R #:nodoc:
       def generate
         super
         self.process_command(@command)
-        io = StringIO.new
-        @document.write(io, 0) # TODO: Maybe replace 0 by -1 so no spaces are inserted?
-        return io.string
+#        io = StringIO.new
+#        @document.write(io, 0) # TODO: Maybe replace 0 by -1 so no spaces are inserted?
+#        return io.string\\
+         return @document.to_s
       end
 
       def tag_name_for_command(klass)
@@ -520,6 +522,172 @@ module Google4R #:nodoc:
       end
     end
 
+
+    # Use the DonateXmlGenerator to create an XML document from a DonateCommand
+    # object.
+    #
+    # Usage:
+    #
+    #   donate = DonateCommand.new
+    #   # set up the DonateCommand
+    #
+    #   generator = DonateCommandXmlGenerator.new(checkout)
+    #   puts generator.generate # => "<xml? version=..."
+    #   File.new('some.xml', 'w') { |f| f.write generator.generate }
+    #--
+    # TODO: Refactor the big, monolitic generator into smaller, easier testable ones. One for each major part of the resulting XML document. This will also reduce the overhead in generating other types of XML documents.
+    #++
+    class DonateCommandXmlGenerator < CommandXmlGenerator
+
+      def initialize(command)
+        @command = command
+      end
+
+      protected
+
+      def process_command(command)
+        root = @document.add_element("checkout-shopping-cart" , { 'xmlns' => 'http://checkout.google.com/schema/2' })
+
+        self.process_shopping_shopping_cart(root, command.shopping_cart)
+
+        # <merchant-checkout-flow-support>
+        flow_element = root.add_element('checkout-flow-support').add_element('merchant-checkout-flow-support')
+        
+        # <continue-shopping-url>
+        if not command.continue_shopping_url.nil? then
+          flow_element.add_element('continue-shopping-url').text = command.continue_shopping_url
+        end
+
+        # <edit-cart-url>
+        if not command.edit_cart_url.nil? then
+          flow_element.add_element('edit-cart-url').text = command.edit_cart_url
+        end
+
+        # <request-buyer-phone-number>
+        if not command.request_buyer_phone_number.nil? then
+          flow_element.add_element('request-buyer-phone-number').text =
+            if command.request_buyer_phone_number then
+              "true"
+            else
+              "false"
+            end
+        end
+
+        # <platform-id>
+        if not command.platform_id.nil? then
+          flow_element.add_element('platform-id').text = command.platform_id
+        end
+
+        # <analytics-data>
+        unless command.analytics_data.nil? then
+          analytics_element = flow_element.add_element('analytics-data')
+          analytics_element.text = command.analytics_data
+        end
+
+      end
+
+      def process_shopping_shopping_cart(parent, shopping_cart)
+        cart_element = parent.add_element('shopping-cart')
+
+        # add <cart-expiration> tag to the cart if a time has been added to the cart
+        if not shopping_cart.expires_at.nil? then
+          cart_element.add_element('cart-expiration').add_element('good-until-date').text =
+            shopping_cart.expires_at.iso8601
+        end
+
+        # add <merchant-private-data> to the cart if any has been set
+        if not shopping_cart.private_data.nil? then
+          self.process_hash(cart_element.add_element('merchant-private-data'), shopping_cart.private_data)
+        end
+
+        # process the items in the cart
+        items_element = cart_element.add_element('items')
+        shopping_cart.items.each do |item|
+          self.process_item(items_element, item)
+        end
+      end
+
+      # Adds an <item> tag to the tag parent with the appropriate values.
+      def process_item(parent, item)
+        item_element = parent.add_element('item')
+
+        item_element.add_element('item-name').text = item.name
+        item_element.add_element('item-description').text = item.description
+
+        item_element.add_element('unit-price', { 'currency' => item.unit_price.currency }).text = item.unit_price.to_s
+        item_element.add_element('quantity').text = item.quantity.to_i
+
+        if not item.id.nil? then
+          item_element.add_element('merchant-item-id').text = item.id
+        end
+
+        if not item.weight.nil? then
+          item_element.add_element('item-weight',
+              { 'unit' => item.weight.unit,
+                'value' => item.weight.value })
+        end
+
+        if not item.private_data.nil? then
+          self.process_hash(item_element.add_element('merchant-private-item-data'), item.private_data)
+        end
+      end
+
+
+      # Converts a Hash into an XML structure. The keys are converted to tag names. If
+      # the values are Hashs themselves then process_hash is called upon them. If the
+      # values are Arrays then a new element with the key's name will be created.
+      #
+      # If a value is an Array then this array will be flattened before it is processed.
+      # Thus, nested arrays are not allowed.
+      #
+      # === Example
+      #
+      #   process_hash(parent, { 'foo' => { 'bar' => 'baz' } })
+      #
+      #   # will produce a structure that is equivalent to.
+      #
+      #   <foo>
+      #     <bar>baz</bar>
+      #   </foo>
+      #
+      #
+      #   process_hash(parent, { 'foo' => [ { 'bar' => 'baz' }, "d'oh", 2 ] })
+      #
+      #   # will produce a structure that is equivalent to.
+      #
+      #   <foo>
+      #     <bar>baz</bar>
+      #   </foo>
+      #   <foo>d&amp;</foo>
+      #   <foo>2</foo>
+      def process_hash(parent, hash)
+        hash.each do |key, value|
+          if value.kind_of? Array then
+            value.flatten.each do |arr_entry|
+              if arr_entry.kind_of? Hash then
+                self.process_hash(parent.add_element(self.str2tag_name(key.to_s)), arr_entry)
+              else
+                parent.add_element(self.str2tag_name(key.to_s)).text = arr_entry.to_s
+              end
+            end
+          elsif value.kind_of? Hash then
+            process_hash(parent.add_element(self.str2tag_name(key.to_s)), value)
+          else
+            parent.add_element(self.str2tag_name(key.to_s)).text = value.to_s
+          end
+        end
+      end
+
+      # Converts a string to a valid XML tag name. Whitespace will be converted into a dash/minus
+      # sign, non alphanumeric characters that are neither "-" nor "_" nor ":" will be stripped.
+      def str2tag_name(str)
+        str.gsub(%r{\s}, '-').gsub(%r{[^a-zA-Z0-9\-\_:]}, '')
+      end
+    end
+
+
+
+
     class ChargeOrderCommandXmlGenerator < CommandXmlGenerator
       
       protected
@@ -873,6 +1041,49 @@ module Google4R #:nodoc:
         if command.date_time_zone then
           dtz_element = flow_element.add_element('date-time-zone')
           dtz_element.text = command.date_time_zone.to_s
+        end
+      end
+    end
+
+    class ReturnNotificationHistoryCommandXmlGenerator < CommandXmlGenerator
+      def initialize(command)
+        @command = command
+      end
+
+      protected
+
+      def process_command(command)
+        root = super
+        flow_element = root
+        # TODO - sanity check format ?
+
+        if command.next_page_token then
+          next_page_token_element = flow_element.add_element('next-page-token')
+          next_page_token_element.text = command.next_page_token.to_s
+          return
+        end
+
+        if command.order_numbers then
+          order_number_element = flow_element.add_element('order-numbers')
+          command.order_numbers.each do |order_number|
+            google_order_number_element = order_number_element.add_element('google-order-number')
+            google_order_number_element.text = order_number.to_s
+          end
+        end
+
+        if command.notification_types then
+          notification_type_element = flow_element.add_element('notification-types')
+          command.notification_types.each do |notification_type|
+            notification_type_element = notification_type_element.add_element('notification-type')
+            notification_type_element.text = notification_type.to_s
+          end
+        end
+
+        if command.start_date then
+          start_date_element = flow_element.add_element('start-time')
+          start_date_element.text = command.start_date.to_s
+          end_date_element = flow_element.add_element('end-time')
+          end_date_element.text = command.end_date.to_s
         end
       end
     end

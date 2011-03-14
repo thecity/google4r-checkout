@@ -1082,5 +1082,20 @@ module Google4R #:nodoc:
       DELIVERED = 'DELIVERED'
       WILL_NOT_DELIVER = 'WILL_NOT_DELIVER'
     end
+
+    # notification_type
+    # authorization-amount -
+    # charge-amount -
+    # chargeback-amount -
+    # new-order -
+    # order-state-change -
+    # refund-amount -
+    # risk-information -
+    class NotificationType
+      def self.types
+        return ['authorization-amount', 'charge-amount', 'chargeback-amount', 'new-order','order-state-change','refund-amount','risk-information']
+      end
+    end
+
   end
 end

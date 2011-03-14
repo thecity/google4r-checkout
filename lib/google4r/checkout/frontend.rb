@@ -127,6 +127,12 @@ module Google4R #:nodoc:
       def create_cancel_order_command
         return CancelOrderCommand.new(self)
       end
+
+      # Factory method that creates a new CheckoutCommand object. Use this method to create
+      # your CheckoutCommand instances.
+      def create_donate_command
+        return DonateCommand.new(self)
+      end
       
       # Factory method to create a new RefundOrderCommand object. Use this method to create
       # your RefundOrderCommand instances.
@@ -204,6 +210,12 @@ module Google4R #:nodoc:
       # your OrderReportCommand instances.
       def create_order_report_command(start_date, end_date)
         return OrderReportCommand.new(self, start_date, end_date)
+      end
+
+      # Factory method that creates a new NotificationHistoryCommand object. Use this method to create
+      # your NotificationHistoryCommand instances.
+      def create_notification_history_command()
+        return NotificationHistoryCommand.new(self)
       end
     end
   end

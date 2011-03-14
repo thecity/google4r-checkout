@@ -137,6 +137,66 @@ module Google4R #:nodoc:
         end
       end
     end
+
+   class NotificationHistory
+      # The Frontend object that created this NotificationHandler
+      attr_accessor :frontend
+
+      attr_accessor :notifications
+
+      attr_accessor :next_page_token
+
+      # Create a new NotificationHandler and assign value of the parameter frontend to
+      # the frontend attribute.
+      def initialize(frontend)
+        @frontend = frontend
+        @notifications = []
+        @next_page_token = nil
+      end
+
+      # Parses the given xml_str and returns the appropriate *Notification class. At the
+      # moment, only NewOrderNotification and OrderStateChangeNotification objects can be
+      # returned.
+      #--
+      # TODO: Add parsing of other notifications here (merchant calculation and the like) when they have been implemented.
+      #++
+      def process(root)
+
+        unless root.elements['notifications'].blank?
+          number_notifications = root.elements['notifications'].elements.size
+          index = 1
+          while (index <= number_notifications)
+            notification = root.elements['notifications'].elements[index]
+            case notification.name
+            when 'new-order-notification' then
+              notifications << NewOrderNotification.create_from_element(notification, frontend)
+            when 'order-state-change-notification' then
+              notifications << OrderStateChangeNotification.create_from_element(notification, frontend)
+            when 'risk-information-notification' then
+              notifications << RiskInformationNotification.create_from_element(notification, frontend)
+            when 'charge-amount-notification' then
+              notifications << ChargeAmountNotification.create_from_element(notification, frontend)
+            when 'refund-amount-notification' then
+              notifications << RefundAmountNotification.create_from_element(notification, frontend)
+            when 'chargeback-amount-notification' then
+              notifications << ChargebackAmountNotification.create_from_element(notification, frontend)
+            when 'authorization-amount-notification' then
+              AuthorizationAmountNotification.create_from_element(notification, frontend)
+            else
+              raise UnknownNotificationType, "Unknown notification type: #{notification.name}"
+            end
+            index = index + 1
+          end
+        end
+
+        unless root.elements['next-page_token'].blank?
+          @next_page_token = root.elements['next-page_token'].text
+        end
+
+      end
+    end
+
+
     
     # Abstract class for all the notifications.  It should not be instantiated
     # directly.

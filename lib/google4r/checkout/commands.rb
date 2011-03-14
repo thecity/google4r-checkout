@@ -47,6 +47,8 @@ module Google4R #:nodoc:
       PRODUCTION_URL_PREFIX = 'https://checkout.google.com/'
       
       CHECKOUT_API_URL = 'api/checkout/v2/merchantCheckout/Merchant/%s'
+
+      DONATE_API_URL = 'api/checkout/v2/merchantCheckout/Donations/%s'
       
       ORDER_PROCESSING_API_URL = 'api/checkout/v2/request/Merchant/%s'
 
@@ -93,7 +95,9 @@ module Google4R #:nodoc:
         url_str += 
           if self.class == CheckoutCommand then
             CHECKOUT_API_URL
-          elsif self.class == OrderReportCommand then
+          elsif self.class == DonateCommand then
+            DONATE_API_URL
+          elsif self.class == OrderReportCommand or self.class == NotificationHistoryCommand then
             ORDER_REPORT_API_URL
           else
             ORDER_PROCESSING_API_URL
@@ -127,6 +131,10 @@ module Google4R #:nodoc:
             when 'request-received'
                 serial_number = xml_doc.elements['/request-received'].attributes['serial-number']
                 return serial_number
+            when 'notification-history-response'
+              nh = NotificationHistory.new(frontend)
+              nh.process(xml_doc.root)
+              return nh
             else
                 raise "Unknown response:\n--\n#{xml_doc.to_s}\n--"
             end
@@ -285,6 +293,69 @@ module Google4R #:nodoc:
         return shipping_method
       end
     end
+
+
+        # The CheckoutCommand represents a <checkout-shopping-cart> command sent
+    # to the server.
+    #
+    # A CheckoutCommand instance can have an arbitrary number of TaxTable
+    # and ShippingMethod instances. You must create these instances using the
+    # create_* methods which CheckoutCommand supplies.
+    #
+    # CheckoutCommand#send_to_google_checkout returns CheckoutRedirectResponse
+    # instances.
+    #
+    # Use the Frontend class to create new CheckoutCommand instances and do not
+    # instanciate the class directly.
+    #
+    # Note that you have to create/set the tax tables for CheckoutCommands before you
+    # can add any items to the cart that define a tax table.
+    #
+    # === Example
+    #
+    #   frontend = Google4R::Checkout::Frontend.new(configuration)
+    #   frontend.tax_table_factory = TaxTableFactory.new
+    #   command = frontend.create_donate_command
+    class DonateCommand < Command
+      # The ShoppingCart of this DonateCommand.
+      attr_reader :shopping_cart
+
+      # The URL at where the cart can be edited (String, optional).
+      attr_accessor :edit_cart_url
+
+      # The URL to continue shopping after completing the checkout (String, optional).
+      attr_accessor :continue_shopping_url
+
+      # A boolean flag; true iff the customer HAS to provide his phone number (optional).
+      attr_accessor :request_buyer_phone_number
+
+      # A Google Checkout merchant ID that identifies the eCommerce provider.
+      attr_accessor :platform_id
+
+      # Setting this allows Google Analytics to track purchases that use Checkout
+      # The value should be as set by the analytics javascript in the hidden form
+      # element names "analyticsdata" on the page with the checkout button.
+      # If left unset then the element will not be generated.
+      # see: http://code.google.com/apis/checkout/developer/checkout_analytics_integration.html
+      attr_accessor :analytics_data
+
+      # Generates the XML for this CheckoutCommand.
+      def to_xml
+        DonateCommandXmlGenerator.new(self).generate
+      end
+
+      # Initialize a new CheckoutCommand with a fresh CheckoutCart and an empty
+      # Array of tax tables and an empty array of ShippingMethod instances.
+      # Do not use this method directly but use Frontent#create_checkout_command
+      # to create CheckoutCommand objects.
+      def initialize(frontend)
+        super(frontend)
+        @shopping_cart = ShoppingCart.new(self)
+      end
+     end
+
+
+
 
     # CheckoutRedirectResponse instances are returned when a CheckoutCommand is successfully
     # processed by Google Checkout.
@@ -563,5 +634,78 @@ module Google4R #:nodoc:
         ReturnOrderReportCommandXmlGenerator.new(self).generate
       end
     end
+
+    # The <notification-history-request> command enables you to retrieve a list of previously sent
+    # Google Checkout notifications.
+    # The API will retrieve all notifications that are less than 450 days old and that are at least 30 minutes old
+    # and you can limit results to notifications to a set of dates, notification type, and order number
+    # http://code.google.com/apis/checkout/developer/Google_Checkout_XML_API_Order_Report_API.html
+    class NotificationHistoryCommand < Command
+      # The earliest time that an order could have been submitted to be
+      # included in the API response (Time)
+      attr_reader :start_date
+
+      # The time before which an order must have been sent to be included
+      # in the API response (Time)
+      attr_reader :end_date
+
+      # Google order numbers
+      attr_accessor :order_numbers
+
+      # a value that identifies an additional set of results for an API request.
+      attr_accessor :next_page_token
+
+      # encapsulates a list of one or more notification types 
+      attr_accessor :notification_types
+
+      def initialize(frontend)
+        super frontend
+      end
+
+      def start_date
+        return @start_date.strftime('%Y-%m-%dT%H:%M:%S') unless @start_date.blank?
+        return nil
+      end
+
+      def end_date
+        return @end_date.strftime('%Y-%m-%dT%H:%M:%S') unless @end_date.blank?
+        return nil
+      end
+
+      def set_dates(start_date, end_date)
+        raise 'start_date has to be of type Time' unless start_date.class == Time
+        raise 'end_date has to be of type Time' unless start_date.class == Time
+        raise 'end_date has to be before start_date' unless
+            end_date >= start_date
+        @start_date = start_date
+        @end_date = end_date
+      end
+
+      def order_numbers=(order_numbers)
+        raise 'order_numbers must be an array' if !order_numbers.is_a?(Array)
+        @order_numbers = order_numbers
+      end
+
+      def notification_types=(notification_types)
+        raise 'notification_types must be an array' if !notification_types.is_a?(Array)
+        notification_types.each do |notification_type|
+          raise 'Invalid fulfillment state %s' % notification_type unless
+              NotificationType.types.include?(notification_type)
+        end
+        @notification_types = notification_types
+      end
+
+      def next_page_token=(next_page_token)
+        raise 'next_page_token must be an string' if !next_page_token.is_a?(String)
+        @next_page_token = next_page_token
+      end
+
+      def to_xml
+        ReturnNotificationHistoryCommandXmlGenerator.new(self).generate
+      end
+    end
+
+
+
   end
 end
